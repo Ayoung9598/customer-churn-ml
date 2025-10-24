@@ -62,8 +62,8 @@ logs/
 Thumbs.db
 
 # Project data and artifacts
-artifacts/
-models/
+# artifacts/
+# models/
 # Keep example or small samples if needed, otherwise ignore all data by default
 # Uncomment next line to ignore all data files
 # data/
