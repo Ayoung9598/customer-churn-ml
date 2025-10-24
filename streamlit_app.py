@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Dict, List
+import json
 
 import pandas as pd
 import streamlit as st
@@ -10,6 +11,7 @@ import yaml
 from src.utils.io import load_model
 
 
+# ---- Cached utilities ----
 @st.cache_resource
 def get_model(model_path: str | Path):
     path = Path(model_path)
@@ -34,7 +36,6 @@ def infer_categorical_values(csv_path: str | Path, cat_cols: List[str]) -> Dict[
     if not csv_path or not Path(csv_path).exists():
         return {c: [] for c in cat_cols}
     df = pd.read_csv(csv_path)
-    # Drop target if present
     return {
         c: sorted(
             [v for v in df[c].dropna().unique().tolist() if v != ""]
@@ -43,12 +44,23 @@ def infer_categorical_values(csv_path: str | Path, cat_cols: List[str]) -> Dict[
     }
 
 
+@st.cache_data
+def load_model_metrics(metrics_path: str | Path):
+    """Load model performance metrics if available."""
+    path = Path(metrics_path)
+    if not path.exists():
+        return None
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+# ---- Streamlit main app ----
 def main() -> None:
     st.set_page_config(page_title="Customer Churn Prediction", layout="centered")
     st.title("📊 Telco Customer Churn Prediction")
     st.caption("Predict the likelihood of a customer leaving the telecom service")
 
-    # ---- About / Overview Section ----
+    # ---- About / Overview ----
     with st.expander("ℹ️ About this project", expanded=True):
         st.markdown("""
         **Goal:**  
@@ -72,18 +84,20 @@ def main() -> None:
     model_path = st.sidebar.text_input("Model path", value="artifacts/churn_model.joblib")
     config_path = st.sidebar.text_input("Columns config", value="configs/columns.yaml")
     sample_csv = st.sidebar.text_input("Sample CSV (for category inference)", value="data/churn_data.csv")
+    metrics_path = st.sidebar.text_input("Metrics file", value="artifacts/churn_model_metric.json")
 
     cfg = load_columns_config(config_path) if Path(config_path).exists() else {
         "numeric": [], "categorical": [], "target": None
     }
     model = get_model(model_path)
+    metrics = load_model_metrics(metrics_path)
 
     if model is None:
         st.warning("⚠️ Model not found. Train first or update the model path.")
     else:
         st.success("✅ Model loaded successfully!")
 
-    # ---- Model Overview ----
+    # ---- Model Information ----
     with st.expander("🧠 Model Information"):
         st.markdown("""
         - **Algorithm:** XGBoost Classifier  
@@ -93,9 +107,15 @@ def main() -> None:
         - **Metric Used:** Accuracy / ROC-AUC on validation data
         """)
 
+        if metrics:
+            st.markdown("#### 📊 Model Performance Summary")
+            for key, val in metrics.items():
+                st.write(f"**{key.upper()}**: {val:.4f}")
+        else:
+            st.info("No metrics file found. Train the model to generate one.")
+
     # ---- Tabs ----
     tab_single, tab_batch = st.tabs(["🎯 Single Prediction", "📁 Batch Prediction"])
-
     cat_choices = infer_categorical_values(sample_csv, cfg["categorical"]) if cfg["categorical"] else {}
 
     # ---- Single Prediction ----
@@ -104,7 +124,6 @@ def main() -> None:
         cols = st.columns(2)
         inputs: Dict[str, object] = {}
 
-        # Numeric inputs
         for col in cfg["numeric"]:
             with cols[0]:
                 default_val = 0.0
@@ -112,7 +131,6 @@ def main() -> None:
                     default_val = 50.0
                 inputs[col] = st.number_input(col, value=float(default_val))
 
-        # Categorical inputs
         for col in cfg["categorical"]:
             with cols[1]:
                 options = cat_choices.get(col, [])
