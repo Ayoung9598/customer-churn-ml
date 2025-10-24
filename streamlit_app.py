@@ -7,6 +7,7 @@ import json
 import pandas as pd
 import streamlit as st
 import yaml
+import plotly.graph_objects as go
 
 from src.utils.io import load_model
 
@@ -84,7 +85,7 @@ def main() -> None:
     model_path = st.sidebar.text_input("Model path", value="artifacts/churn_model.joblib")
     config_path = st.sidebar.text_input("Columns config", value="configs/columns.yaml")
     sample_csv = st.sidebar.text_input("Sample CSV (for category inference)", value="data/churn_data.csv")
-    metrics_path = st.sidebar.text_input("Metrics file", value="artifacts/churn_model_metric.json")
+    metrics_path = st.sidebar.text_input("Metrics file", value="artifacts/churn_model_metrics.json")
 
     cfg = load_columns_config(config_path) if Path(config_path).exists() else {
         "numeric": [], "categorical": [], "target": None
@@ -98,7 +99,7 @@ def main() -> None:
         st.success("✅ Model loaded successfully!")
 
     # ---- Model Information ----
-    with st.expander("🧠 Model Information"):
+    with st.expander("🧠 Model Information", expanded=True):
         st.markdown("""
         - **Algorithm:** XGBoost Classifier  
         - **Framework:** scikit-learn / XGBoost pipeline  
@@ -107,12 +108,42 @@ def main() -> None:
         - **Metric Used:** Accuracy / ROC-AUC on validation data
         """)
 
+        # ---- Model Performance Metrics Section ----
         if metrics:
-            st.markdown("#### 📊 Model Performance Summary")
-            for key, val in metrics.items():
-                st.write(f"**{key.upper()}**: {val:.4f}")
+            # Normalize values to float (important for Plotly)
+            metrics = {k: float(v) for k, v in metrics.items()}
+
+            st.markdown("#### 📈 Model Performance Metrics")
+
+            # Show metrics
+            cols = st.columns(len(metrics))
+            for i, (k, v) in enumerate(metrics.items()):
+                cols[i].metric(label=k.upper(), value=f"{v:.3f}")
+
+            # ---- Display ROC-AUC Gauge ----
+            roc_auc = metrics.get("roc_auc") or metrics.get("auc")
+            if roc_auc is not None:
+                fig = go.Figure(
+                    go.Indicator(
+                        mode="gauge+number",
+                        value=roc_auc,
+                        title={"text": "ROC-AUC Score"},
+                        gauge={
+                            "axis": {"range": [0, 1]},
+                            "bar": {"color": "green" if roc_auc > 0.75 else "orange"},
+                            "steps": [
+                                {"range": [0, 0.6], "color": "#ffcccc"},
+                                {"range": [0.6, 0.8], "color": "#ffe699"},
+                                {"range": [0.8, 1.0], "color": "#c6efce"},
+                            ],
+                        },
+                    )
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("No ROC-AUC value found in metrics JSON.")
         else:
-            st.info("No metrics file found. Train the model to generate one.")
+            st.info("No metrics file found (expected at `artifacts/churn_model_metrics.json`).")
 
     # ---- Tabs ----
     tab_single, tab_batch = st.tabs(["🎯 Single Prediction", "📁 Batch Prediction"])
