@@ -35,39 +35,75 @@ def infer_categorical_values(csv_path: str | Path, cat_cols: List[str]) -> Dict[
         return {c: [] for c in cat_cols}
     df = pd.read_csv(csv_path)
     # Drop target if present
-    return {c: sorted([v for v in df[c].dropna().unique().tolist() if v != ""]) if c in df.columns else [] for c in cat_cols}
+    return {
+        c: sorted(
+            [v for v in df[c].dropna().unique().tolist() if v != ""]
+        ) if c in df.columns else []
+        for c in cat_cols
+    }
 
 
 def main() -> None:
-    st.set_page_config(page_title="Customer Churn - Streamlit UI", layout="centered")
-    st.title("Customer Churn Prediction")
-    st.caption("Interactive UI on top of the trained scikit-learn/XGBoost pipeline")
+    st.set_page_config(page_title="Customer Churn Prediction", layout="centered")
+    st.title("📊 Telco Customer Churn Prediction")
+    st.caption("Predict the likelihood of a customer leaving the telecom service")
 
-    # Sidebar configuration
-    st.sidebar.header("Configuration")
+    # ---- About / Overview Section ----
+    with st.expander("ℹ️ About this project", expanded=True):
+        st.markdown("""
+        **Goal:**  
+        This interactive app predicts customer churn — whether a telecom customer is likely to leave the service — 
+        using a trained **XGBoost** model built on structured customer data.
+
+        **Dataset Overview:**  
+        Each row represents a customer, and each column contains attributes about:
+        - **Churn:** Whether the customer left within the last month  
+        - **Services:** Phone, multiple lines, internet, online security, backup, device protection, streaming TV/movies  
+        - **Account Info:** Tenure, contract type, payment method, paperless billing, monthly & total charges  
+        - **Demographics:** Gender, senior citizen status, partner, dependents  
+
+        **Use Case:**  
+        Businesses can use this to identify customers at high churn risk and take proactive retention actions
+        (e.g., loyalty offers or service quality improvements).
+        """)
+
+    # ---- Sidebar configuration ----
+    st.sidebar.header("⚙️ Configuration")
     model_path = st.sidebar.text_input("Model path", value="artifacts/churn_model.joblib")
     config_path = st.sidebar.text_input("Columns config", value="configs/columns.yaml")
-    sample_csv = st.sidebar.text_input("Sample CSV (for choices)", value="data/churn_data.csv")
+    sample_csv = st.sidebar.text_input("Sample CSV (for category inference)", value="data/churn_data.csv")
 
-    cfg = load_columns_config(config_path) if Path(config_path).exists() else {"numeric": [], "categorical": [], "target": None}
+    cfg = load_columns_config(config_path) if Path(config_path).exists() else {
+        "numeric": [], "categorical": [], "target": None
+    }
     model = get_model(model_path)
 
     if model is None:
-        st.warning("Model not found. Train first or update the model path.")
+        st.warning("⚠️ Model not found. Train first or update the model path.")
     else:
-        st.success("Model loaded")
+        st.success("✅ Model loaded successfully!")
 
-    # Tabs: Single prediction | Batch prediction
-    tab_single, tab_batch = st.tabs(["Single prediction", "Batch prediction"])
+    # ---- Model Overview ----
+    with st.expander("🧠 Model Information"):
+        st.markdown("""
+        - **Algorithm:** XGBoost Classifier  
+        - **Framework:** scikit-learn / XGBoost pipeline  
+        - **Input Features:** Numeric + Categorical columns (encoded)
+        - **Output:** Probability of churn (0–1) and binary prediction (0 = stay, 1 = churn)
+        - **Metric Used:** Accuracy / ROC-AUC on validation data
+        """)
 
-    # Prepare choices for categorical fields (best effort from CSV)
+    # ---- Tabs ----
+    tab_single, tab_batch = st.tabs(["🎯 Single Prediction", "📁 Batch Prediction"])
+
     cat_choices = infer_categorical_values(sample_csv, cfg["categorical"]) if cfg["categorical"] else {}
 
+    # ---- Single Prediction ----
     with tab_single:
-        st.subheader("Enter feature values")
+        st.subheader("Enter Feature Values")
         cols = st.columns(2)
-
         inputs: Dict[str, object] = {}
+
         # Numeric inputs
         for col in cfg["numeric"]:
             with cols[0]:
@@ -81,28 +117,29 @@ def main() -> None:
             with cols[1]:
                 options = cat_choices.get(col, [])
                 if options:
-                    default_opt = options[0]
                     inputs[col] = st.selectbox(col, options=options, index=0)
                 else:
                     inputs[col] = st.text_input(col, value="")
 
-        if st.button("Predict"):
+        if st.button("🔍 Predict Churn"):
             if model is None:
                 st.error("Model not loaded")
             else:
                 df = pd.DataFrame([inputs])
                 proba = float(model.predict_proba(df)[:, 1][0])
                 pred = int(proba >= 0.5)
-                st.metric("Churn probability", f"{proba:.3f}")
-                st.write({"prediction": pred})
+                st.metric("Churn Probability", f"{proba:.3f}")
+                st.write(f"**Predicted class:** {'Churn' if pred == 1 else 'No Churn'}")
 
+    # ---- Batch Prediction ----
     with tab_batch:
-        st.subheader("Upload CSV for batch prediction")
-        uploaded = st.file_uploader("CSV file", type=["csv"])
+        st.subheader("Upload a CSV for Batch Prediction")
+        uploaded = st.file_uploader("Select a CSV file", type=["csv"])
         if uploaded is not None:
             batch_df = pd.read_csv(uploaded)
-            st.write("Preview:")
+            st.write("Preview of uploaded data:")
             st.dataframe(batch_df.head())
+
             if model is None:
                 st.error("Model not loaded")
             else:
@@ -111,8 +148,10 @@ def main() -> None:
                 out = batch_df.copy()
                 out["churn_proba"] = proba
                 out["churn_pred"] = preds
+
+                st.success("✅ Predictions generated successfully!")
                 st.download_button(
-                    label="Download predictions",
+                    label="📥 Download Predictions CSV",
                     data=out.to_csv(index=False).encode("utf-8"),
                     file_name="predictions.csv",
                     mime="text/csv",
@@ -121,5 +160,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
